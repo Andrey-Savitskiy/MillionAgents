@@ -1,7 +1,8 @@
 import time
 import csv
 import requests
-from bs4 import BeautifulSoup as bs
+from bs4 import BeautifulSoup
+from bs4.element import Tag
 from loguru import logger
 from fake_useragent import UserAgent
 from selenium import webdriver
@@ -15,31 +16,38 @@ logger.add('logs/debug.log', level="WARNING", rotation="50 MB", compression='zip
            enqueue=True, backtrace=True, diagnose=True)
 
 
-URL = "https://www.detmir.ru/catalog/index/name/zdorovyj_perekus_pp/page/"
+URL = "https://www.detmir.ru/catalog/index/name/zdorovyj_perekus_pp/page/1"
 
 
-def product_info(product: WebElement):
-    product_url = product.get_attribute('href')
+def product_info(product: Tag):
+    product_url = product.find('a')['href']
     print(product_url)
     product_id = product_url.split('/')[-2]
     print(product_id)
-    product_name = product.find_element(By.CLASS_NAME, 'Kj').text
+    product_name = product.find('p', class_='Kj').text
     print(product_name)
     print()
-    time.sleep(0.2)
+
 
 
 def parser(driver: WebDriver, town: str):
     driver.get(URL)
-    a = driver.page_source
-    products_list = driver.find_elements(By.CLASS_NAME, 'Kf')
+    html = driver.page_source
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # special = soup.find('div', class_='n_4')
+    # special.extract()
+    products_tag = soup.find('div', class_='n_1')
+    products_list = products_tag.find_next()
+    # products_list = products_tag.find_all('div', class_=['p_1', product_class, 'n_2'])
+
+    print(products_list)
+    print(len(products_list))
 
     for product in products_list:
         try:
             product_info(product)
-        except StaleElementReferenceException:
-            driver.get(URL)
-            product_info(product)
+        except TypeError:
             continue
         #
         # product_price = product.find_element(By.CLASS_NAME, 'Uz').text
