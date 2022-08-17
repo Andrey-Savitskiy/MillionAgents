@@ -1,78 +1,97 @@
-import time
+import re
 import csv
-import requests
+import time
+
 from bs4 import BeautifulSoup
 from bs4.element import Tag
-from loguru import logger
-from fake_useragent import UserAgent
 from selenium import webdriver
-from selenium.common import StaleElementReferenceException
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.remote.webelement import WebElement
 from webdriver_manager.chrome import ChromeDriverManager
 
-logger.add('logs/debug.log', level="WARNING", rotation="50 MB", compression='zip',
-           enqueue=True, backtrace=True, diagnose=True)
+from config import logger, URL, TOWNS, option
 
 
-URL = "https://www.detmir.ru/catalog/index/name/zdorovyj_perekus_pp/page/1"
+def price_edit(price: str) -> str:
+    delete_whitespace = re.sub(' ', '', price)
+    return re.sub(',', '.', delete_whitespace)[:-2]
 
 
-def product_info(product: Tag):
-    product_url = product.find('a')['href']
-    print(product_url)
-    product_id = product_url.split('/')[-2]
-    print(product_id)
-    product_name = product.find('p', class_='Kj').text
-    print(product_name)
-    print()
+def load_page(driver: WebDriver, page_counter: int, town: str) -> None:
+    driver.get(URL + str(page_counter))
+
+    if town == 'spb' and page_counter == 1:
+        region = driver.find_element(by=By.XPATH, value='//*[@id="app-container"]/div[2]/header/div[2]/div/div[1]/ul/li[1]')
+        region.click()
+
+        spb = driver.find_element(by=By.XPATH, value='/html/body/div[9]/div/div[2]/section/div/ul/li[1]/ul/li[1]/span')
+        spb.click()
+        time.sleep(3)
 
 
-
-def parser(driver: WebDriver, town: str):
-    driver.get(URL)
+def get_product_list(driver: WebDriver) -> list:
     html = driver.page_source
     soup = BeautifulSoup(html, 'html.parser')
 
-    # special = soup.find('div', class_='n_4')
-    # special.extract()
-    products_tag = soup.find('div', class_='n_1')
-    products_list = products_tag.find_next()
-    # products_list = products_tag.find_all('div', class_=['p_1', product_class, 'n_2'])
-
-    print(products_list)
-    print(len(products_list))
-
-    for product in products_list:
-        try:
-            product_info(product)
-        except TypeError:
-            continue
-        #
-        # product_price = product.find_element(By.CLASS_NAME, 'Uz').text
-        # if product_price:
-        #     product_promo_price = product.find_element(By.CLASS_NAME, 'Ux').text
-        # else:
-        #     product_price = product.find_element(By.CLASS_NAME, 'Ux').text
-        #     product_promo_price = '---'
+    products_list = soup.find_all('div', class_='n_2')
+    return products_list
 
 
+def product_info(product: Tag, town: str) -> None:
+    product_url = product.find('a')['href']
+    # print(product_url)
+    product_id = product_url.split('/')[-2]
+    # print(product_id)
+    product_name = product.find('p', class_='Kj').text
+    # print(product_name)
+
+    try:
+        product_price = price_edit(product.find('span', class_='Kw').text)
+        product_promo_price = price_edit(product.find('p', class_='Ku').text)
+    except AttributeError:
+        product_price = price_edit(product.find('p', class_='Ku').text)
+        product_promo_price = '---'
+
+    # print(f'{product_price} : {product_promo_price}')
+    # print()
+
+    with open('result.csv', mode='a', encoding='utf-8') as file:
+        file_writer = csv.writer(file, delimiter = ',', lineterminator='\n')
+        file_writer.writerow([product_id, product_name, product_price,
+                              TOWNS[town], product_promo_price, product_url])
 
 
+def parser(driver: WebDriver, town: str) -> int:
+    page_counter = 1
+    load_page(driver, page_counter, town)
+    products_list = get_product_list(driver)
+
+    while len(products_list) > 0:
+        for product in products_list:
+            try:
+                product_info(product, town)
+            except AttributeError:
+                return 0
+
+        print(f'{page_counter}: {len(products_list)}')
+
+        page_counter += 1
+        load_page(driver, page_counter, town)
+        products_list = get_product_list(driver)
+
+    return 0
 
 
 @logger.catch()
 def main():
-    driver = webdriver.Chrome(ChromeDriverManager().install())
+    driver = webdriver.Chrome(ChromeDriverManager().install(), chrome_options=option)
+    driver.implicitly_wait(10)
     try:
-        # region = driver.find_element(by=By.XPATH, value='/html/body/div[3]/div[2]/header/div[2]/div/div[1]/ul/li[1]/div/div/div[1]/div/span')
-        # region.click()
-        parser(driver, 'Moscow')
+        for town_key in TOWNS.keys():
+            parser(driver, town_key)
+            print(f'End of {town_key}\n')
 
-
-
-        time.sleep(60)
+        # time.sleep(60)
     finally:
         driver.close()
 
